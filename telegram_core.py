@@ -36,6 +36,7 @@ from telethon.tl.types import (
     ChannelParticipantsKicked,
     ChannelParticipantsAdmins,
     InputChatPhotoEmpty,
+    ReactionEmoji,
 )
 
 # Load environment variables
@@ -107,6 +108,18 @@ class SendRefusedError(Exception):
     def __init__(self, message: str = FIRST_WRITE_REFUSAL):
         super().__init__(message)
         self.status_code = 403
+        self.message = message
+
+
+REACTION_DEFAULT_EMOJI = "🔥"
+
+
+class ReactionRefusedError(Exception):
+    """Reaction blocked by the guard: only an incoming message in an existing private user dialog."""
+
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
         self.message = message
 
 
@@ -1079,6 +1092,9 @@ class TelegramCore:
             result = {
                 "id": message.id,
                 "sender": sender_name,
+                # Additive: direction and author id straight from Telegram.
+                "out": bool(getattr(message, "out", False)),
+                "sender_id": getattr(message, "sender_id", None),
                 "date": message.date.isoformat(),
                 "text": message.message or "",
                 "reply_to": message.reply_to.reply_to_msg_id if message.reply_to else None,
@@ -1373,6 +1389,73 @@ class TelegramCore:
                 return log_and_format_error("edit_message", retry_e, chat_id=chat_id, message_id=message_id)
         except Exception as e:
             return log_and_format_error("edit_message", e, chat_id=chat_id, message_id=message_id)
+
+    async def _ensure_may_react(self, entity: Any, message_id: int) -> None:
+        """Reaction guard: a private user dialog (no bots, not Saved Messages), incoming message.
+
+        Raises ReactionRefusedError: 403 not a private user dialog or our own message, 404 no such message.
+        """
+        if not isinstance(entity, User) or getattr(entity, "is_self", False) or getattr(entity, "bot", False):
+            logger.warning("reaction refused: chat %s is not a private user dialog", getattr(entity, "id", "?"))
+            raise ReactionRefusedError(403, "reaction refused: only private user dialogs")
+        await self._wait_for_rate_limit()
+        message = await self.client.get_messages(entity, ids=message_id)
+        if message is None:
+            raise ReactionRefusedError(404, f"reaction refused: message {message_id} not found in this dialog")
+        if getattr(message, "out", True) is not False:
+            logger.warning("reaction refused: message %s in chat %s is not incoming", message_id, entity.id)
+            raise ReactionRefusedError(403, "reaction refused: only incoming messages")
+        await self._wait_for_rate_limit()  # space the guard read from the reaction itself
+
+    async def _react_once(self, chat_id: Union[int, str], message_id: int, emoji: str) -> str:
+        """Resolve the dialog, run the guard, send one SendReactionRequest."""
+        try:
+            entity = await self.client.get_entity(chat_id)
+        except ValueError:
+            raise ReactionRefusedError(404, "reaction refused: no dialog with this chat")
+        await self._ensure_may_react(entity, message_id)
+        await self.client(
+            functions.messages.SendReactionRequest(
+                peer=utils.get_input_peer(entity),
+                msg_id=message_id,
+                reaction=[ReactionEmoji(emoticon=emoji)],
+            )
+        )
+        return f"Reaction '{emoji}' sent to message {message_id} in chat {chat_id}."
+
+    async def send_reaction(
+        self, chat_id: Union[int, str], message_id: int, emoji: str = REACTION_DEFAULT_EMOJI
+    ) -> str:
+        """React to an incoming message in a private user dialog with rate limiting protection.
+
+        Guard refusals raise ReactionRefusedError (4xx); Telegram failures return the usual error string.
+        """
+        chat_id, error = validate_ids("chat_id", chat_id)
+        if error:
+            raise ReactionRefusedError(400, f"reaction refused: {error}")
+
+        # A reaction is a chat action: same 1 msg/s per-chat limit as sending
+        await self._check_message_rate_limit(chat_id)
+
+        # Wait before the request to respect the global rate limit
+        await self._wait_for_rate_limit()
+
+        try:
+            return await self._react_once(chat_id, message_id, emoji)
+        except ReactionRefusedError:
+            raise
+        except TelethonFloodWaitError as e:
+            # Handle Telethon FLOOD_WAIT: wait (capped at 1 hour) and retry once
+            wait_time = min(float(e.seconds), 3600.0)
+            await asyncio.sleep(wait_time + random.uniform(0, 1))
+            try:
+                return await self._react_once(chat_id, message_id, emoji)
+            except ReactionRefusedError:
+                raise
+            except Exception as retry_e:
+                return log_and_format_error("send_reaction", retry_e, chat_id=chat_id, message_id=message_id)
+        except Exception as e:
+            return log_and_format_error("send_reaction", e, chat_id=chat_id, message_id=message_id)
 
     async def delete_message(
         self, chat_id: Union[int, str], message_id: int, revoke: bool = True

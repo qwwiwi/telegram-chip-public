@@ -14,7 +14,15 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from telegram_core import telegram, MediaFetchError, FolderError, SendRefusedError, log_and_format_error
+from telegram_core import (
+    telegram,
+    MediaFetchError,
+    FolderError,
+    SendRefusedError,
+    ReactionRefusedError,
+    REACTION_DEFAULT_EMOJI,
+    log_and_format_error,
+)
 
 # ==================== Request/Response Models ====================
 
@@ -43,6 +51,12 @@ class DeleteMessageRequest(BaseModel):
     chat_id: Union[int, str]
     message_id: int
     revoke: bool = True
+
+
+class ReactMessageRequest(BaseModel):
+    chat_id: Union[int, str]
+    message_id: int = Field(..., gt=0)
+    emoji: str = Field(REACTION_DEFAULT_EMOJI, min_length=1, max_length=16)
 
 
 class ForwardMessageRequest(BaseModel):
@@ -148,6 +162,12 @@ def make_response(result: str) -> ApiResponse:
 async def send_refused_handler(_request, exc: SendRefusedError):
     """Never-write-first refusal: HTTP 403 in the legacy ApiResponse shape."""
     return JSONResponse(status_code=403, content={"success": False, "data": None, "error": exc.message})
+
+
+@app.exception_handler(ReactionRefusedError)
+async def reaction_refused_handler(_request, exc: ReactionRefusedError):
+    """Reaction guard refusal (400/403/404) in the legacy ApiResponse shape."""
+    return JSONResponse(status_code=exc.status_code, content={"success": False, "data": None, "error": exc.message})
 
 
 # ==================== Health Check ====================
@@ -312,6 +332,21 @@ async def delete_message(request: DeleteMessageRequest):
         chat_id=request.chat_id,
         message_id=request.message_id,
         revoke=request.revoke,
+    )
+    return make_response(result)
+
+
+@app.post("/messages/react", response_model=ApiResponse)
+async def react_message(request: ReactMessageRequest):
+    """React to an INCOMING message in an existing private user dialog (default 🔥).
+
+    Refusals (legacy shape): 400 bad chat_id, 404 no dialog / no such message,
+    403 not a private user dialog or our own message. Telegram errors: HTTP 200 success=false.
+    """
+    result = await telegram.send_reaction(
+        chat_id=request.chat_id,
+        message_id=request.message_id,
+        emoji=request.emoji,
     )
     return make_response(result)
 
