@@ -38,6 +38,7 @@
   - `send_voice()` - отправка голосовых сообщений
   - `send_sticker()` - отправка стикеров
   - `send_gif()` - отправка GIF
+  - `send_reaction()` - реакция (`POST /messages/react`, только входящие сообщения в личных диалогах)
   - `forward_message()` - пересылка сообщений
   - `reply_to_message()` - ответ на сообщение
   - `create_poll()` - создание опросов (отправка сообщения с опросом)
@@ -254,7 +255,7 @@ except (RateLimitError, FloodWaitError) as e:
   - `get_entity` (используется во всех методах)
 
 ✅ **Защищенные методы в HTTP API** (`telegram_core.py`):
-- **Операции записи:** `send_message`, `forward_message`, `edit_message`
+- **Операции записи:** `send_message`, `forward_message`, `edit_message`, `send_reaction` (лимит 1/сек на чат, ожидание FloodWait до 1 часа и один повтор)
 - **Операции чтения:** `get_messages` (с обработкой FloodWaitError)
 
 ✅ **Защищенные методы в Python клиенте** (`telegram_client.py`):

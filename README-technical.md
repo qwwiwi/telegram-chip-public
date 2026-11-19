@@ -43,7 +43,7 @@ CHIP_EXPORT_DIR=...         # default: <skill>/exports
 ## Recommended authorization flow (important)
 
 1. Obtain `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` at `https://my.telegram.org/apps`.
-   - Prefer mobile internet without Wi‑Fi/VPN, or use a fresh private/incognito browser session.
+   - Open the site without a VPN (mobile internet or a fresh private/incognito session). From Russia use a connection from abroad or a static residential proxy: a datacenter VPN/proxy usually fails. Step by step: README.md.
 2. Put API credentials into `.env`.
 3. Run:
 
@@ -87,10 +87,11 @@ curl http://127.0.0.1:8080/health
 - `GET /chats/list?limit=50&chat_type=user|group|channel&unread_only=false` — chat metadata. Each item includes `unread_count`, `is_pinned`, `read_outbox_max_id`, `read_inbox_max_id`, `top_message_id`.
 - `GET /chats/{chat_id}/read_status` — read receipts for one chat: `{read_outbox_max_id, read_inbox_max_id, top_message_id, unread_count}`. Lighter than `/chats/list` (single peer via `GetPeerDialogsRequest`).
 - `GET /chats/{chat_id}/messages?page=1&page_size=20` — text lines `ID: n | sender | Date: … | Message: <text>`; media messages get a marker (see «Media»)
-- `GET /chats/{chat_id}/messages/{message_id}` — single message; media fields `media_kind`, `media_marker`, `file_name`, `mime_type`, `size`, `duration` (null when not applicable); if `media_type=MessageMediaPoll`, response includes `poll{ question, answers, results, total_voters, multiple_choice, public_voters, closed }`
+- `GET /chats/{chat_id}/messages/{message_id}` — single message; fields `out` (sent by our account) and `sender_id`; media fields `media_kind`, `media_marker`, `file_name`, `mime_type`, `size`, `duration` (null when not applicable); if `media_type=MessageMediaPoll`, response includes `poll{ question, answers, results, total_voters, multiple_choice, public_voters, closed }`
 - `GET /chats/{chat_id}/messages/{message_id}/media` — download media (see «Media» below)
 - `GET /chats/{chat_id}/messages/{message_id}/media?transcribe=1` — download + transcribe voice/video-note/audio/video
 - `GET /chats/{chat_id}/messages/{message_id}/media/file` — raw bytes of the (cached) media file
+- `POST /messages/react` `{chat_id, message_id, emoji?}` — reaction (default 🔥) on an INCOMING message in a private user dialog only; refused with 400/403/404 otherwise (`reaction refused: …`)
 - `POST /messages/send` — refused with 403 if the private contact never wrote first (see the rule at the top)
 - `GET /folders`, `POST /folders/upsert` — chat folders (see «Chat folders»)
 - `POST /supergroups` `{title, about?, users?}` — supergroup: megagroup + invites + history visible to new members; returns JSON with marked `chat_id` and per-user invite results (see SKILL.md «Supergroups»)

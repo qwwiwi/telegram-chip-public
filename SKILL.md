@@ -28,11 +28,14 @@ Use this exact order:
 
 ## Credential acquisition recommendations
 
-When obtaining `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` at `my.telegram.org/apps`:
-- Prefer phone mobile internet (without Wi‑Fi/VPN), **or**
-- Use a clean private/incognito browser session.
+When obtaining `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` at `my.telegram.org`:
+- Open the site WITHOUT a VPN. Mobile internet or a clean private/incognito browser session helps.
+- From Russia the site often does not open without a VPN. Use a connection from abroad or a STATIC RESIDENTIAL proxy;
+  a VPN/proxy with a datacenter IP will most likely fail (`ERROR` on create, or the page does not load).
+- Form: App title and Short name – anything (Short name 5-32 latin letters/digits), URL `www.google.com`,
+  Platform `Web` (or `Other`), description may stay empty. Never share `api_hash`.
 
-This reduces auth friction and weird web-session/cache issues.
+Step by step (Russian): `README.md` → «Как получить api_id и api_hash».
 
 ## Hard rules
 
@@ -61,6 +64,12 @@ to one person within twenty minutes. It read as spam, and it was.
 A monitoring loop must READ ONLY (`GET /chats/...`). Reading is unlimited;
 sending is not.
 
+## Reactions
+
+- `POST /messages/react` — body `{"chat_id": 123, "message_id": 10, "emoji": "🔥"}` (`emoji` optional, default 🔥). Reacts to an INCOMING message in an existing private user dialog.
+  Guard (nothing is sent when refused, legacy shape `{"success": false, "data": null, "error": "reaction refused: …"}`): 400 bad `chat_id`; 404 no dialog with this chat / no such message; 403 group, channel, bot, Saved Messages, or the message is our own (`out`).
+  Validation: `message_id` > 0, `emoji` 1-16 chars (HTTP 422 otherwise). Telegram-side errors: HTTP 200, `success: false`. One FloodWait is waited out and retried once. Same 1 request/s per-chat limit as sending, shared global limiter.
+
 ## Chat folders (chat tags)
 
 - `GET /folders?include_chats=true` — list folders: `id, title, type (filter|chatlist|default), color, emoticon, pinned_count, include_count, exclude_count, pinned_peer_ids, include_peer_ids` (+ `chats` when `include_chats=true`; use `include_chats=false` for a cheap call).
@@ -81,7 +90,7 @@ sending is not.
 
 In `GET /chats/{id}/messages` a media message shows a marker instead of empty text: `[файл: a.pdf, 1.2 MB]`, `[голосовое 0:10]`, `[фото]`, `[кружок 0:12]`, `[видео 0:35]`, `[стикер]`, `[опрос: …]` + caption. Never treat a media message as «nothing was said».
 
-- `GET /chats/{id}/messages/{msg}` — adds `media_kind`, `file_name`, `mime_type`, `size`, `duration`.
+- `GET /chats/{id}/messages/{msg}` — adds `media_kind`, `file_name`, `mime_type`, `size`, `duration`. Every single-message response also has `out` (true = sent by our account) and `sender_id` (author id from Telegram, may be null).
 - `GET /chats/{id}/messages/{msg}/media?v=2` — download to the chip host cache, returns `{path, file_name, mime_type, size, kind, duration, cached}`. Without `v=2` the legacy contract applies (always HTTP 200, errors as `{success:false,error}` in `data`).
 - `GET /chats/{id}/messages/{msg}/media/file` — the bytes (use this when the chip runs on another host, e.g. behind an SSH tunnel: `path` is a path on the chip host). Save, then Read the file.
 - `GET /chats/{id}/messages/{msg}/media?transcribe=1` — voice/кружок/audio transcript via Groq Whisper (`transcript` field). 503 = Groq key not configured on the chip host.
